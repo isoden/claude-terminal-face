@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ascii-face shader preview</title>
+<style>
+  body { background:#111; color:#eee; font-family:monospace; padding: 8px; }
+  canvas { background:#000; border:1px solid #444; image-rendering:pixelated; }
+  .row { margin: 6px 0; display: flex; align-items: center; gap: 8px; }
+  .row label { min-width: 0; }
+  input[type=range] { width: 220px; }
+  #log { white-space: pre-wrap; color: #f88; }
+  #log.ok { color: #8f8; }
+</style>
+</head>
+<body>
+<h3 style="margin:4px 0 12px">ascii-face shader preview</h3>
+
+<div class="row">
+  <label>shader file: <input id="file" type="file" accept=".glsl,.frag,.txt"></label>
+  <span id="fileName" style="opacity:.6"></span>
+</div>
+<div class="row">
+  since (last cursor change, sec): <input id="since" type="range" min="0" max="30" step="0.1" value="1"> <span id="sinceVal"></span>
+</div>
+<div class="row">
+  prev state: <select id="prevState">
+    <option value="idle">idle</option>
+    <option value="thinking">thinking（考える）</option>
+    <option value="working">working（集中）</option>
+    <option value="done">done（ドヤ）</option>
+    <option value="err">err（困り）</option>
+  </select>
+  current state: <select id="curState">
+    <option value="idle">idle</option>
+    <option value="thinking">thinking（考える）</option>
+    <option value="working">working（集中）</option>
+    <option value="done">done（ドヤ）</option>
+    <option value="err">err（困り）</option>
+  </select>
+  <span style="opacity:.6">since が ERR_EASE 未満だと prev→current をイージング中として見える</span>
+</div>
+<div class="row">
+  gaze x: <input id="gx" type="range" min="-1" max="1" step="0.01" value="0">
+  gaze y: <input id="gy" type="range" min="-1" max="1" step="0.01" value="0">
+</div>
+<div class="row">
+  <label><input id="ghosttyFlip" type="checkbox" checked> Ghostty simulation (fragCoord.y は上原点・下向き正)</label>
+</div>
+<div class="row">
+  <label><input id="live" type="checkbox"> live (iTime を実時間で進める。カーソルはキャンバス上のマウス位置)</label>
+</div>
+
+<canvas id="c" width="540" height="504"></canvas>
+<div id="log">shader file を選択してください</div>
+
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+const logEl = document.getElementById('log');
+if (!gl) logEl.textContent = 'WebGL2 が使えません';
+
+const vsSrc = `#version 300 es
+in vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+function buildFsSrc(shaderBody) {
+  return `#version 300 es
+precision highp float;
+precision highp int;
+uniform vec2 iResolution;
+uniform float iTime;
+uniform float iTimeDelta;
+uniform sampler2D iChannel0;
+uniform vec2 iCurrentCursor;
+uniform vec2 iPreviousCursor;
+uniform float iTimeCursorChange;
+uniform vec4 iCurrentCursorColor;
+uniform vec4 iPreviousCursorColor;
+uniform float uGhosttyFlip; // 1.0 = Ghostty の実挙動（fragCoord.y が上原点・下向き正）を再現
+out vec4 outColor;
+
+${shaderBody}
+
+void main() {
+  vec4 col;
+  vec2 fc = gl_FragCoord.xy;
+  if (uGhosttyFlip > 0.5) fc.y = iResolution.y - fc.y;
+  mainImage(col, fc);
+  outColor = col;
+}
+`;
+}
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    const info = gl.getShaderInfoLog(s);
+    gl.deleteShader(s);
+    throw new Error(info);
+  }
+  return s;
+}
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+
+// dummy black texture for iChannel0 (empty terminal background)
+const tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,255]));
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+let prog = null;
+let uniforms = {};
+let startedAt = null;
+let mouse = { x: 0.5, y: 0.5 }; // 0..1, canvas-local
+
+function setShaderSource(src) {
+  try {
+    const fsSrc = buildFsSrc(src);
+    const vs = compile(gl.VERTEX_SHADER, vsSrc);
+    const fs = compile(gl.FRAGMENT_SHADER, fsSrc);
+    const newProg = gl.createProgram();
+    gl.attachShader(newProg, vs);
+    gl.attachShader(newProg, fs);
+    gl.linkProgram(newProg);
+    if (!gl.getProgramParameter(newProg, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(newProg));
+    }
+    prog = newProg;
+    gl.useProgram(prog);
+    const aPos = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    uniforms = {};
+    ['iResolution','iTime','iTimeDelta','iChannel0','iCurrentCursor','iPreviousCursor',
+     'iTimeCursorChange','iCurrentCursorColor','iPreviousCursorColor','uGhosttyFlip'
+    ].forEach(n => uniforms[n] = gl.getUniformLocation(prog, n));
+    logEl.textContent = 'compiled OK';
+    logEl.className = 'ok';
+    render();
+  } catch (e) {
+    logEl.textContent = 'COMPILE/LINK ERROR:\n' + e.message;
+    logEl.className = '';
+  }
+}
+
+// ascii-face-status.glsl の FACE_COL/THINK_COL/WORK_COL/DONE_COL/ERR_COL と同じ値。
+// 値を変えたらシェーダー側とここを両方更新すること（spec.md §7.4 と同種の二重管理）。
+const PALETTE = {
+  idle:     [0.36, 0.88, 0.79, 1.0],
+  thinking: [0.94, 0.76, 0.29, 1.0],
+  working:  [0.24, 0.44, 0.88, 1.0],
+  done:     [0.55, 0.83, 0.28, 1.0],
+  err:      [0.95, 0.36, 0.42, 1.0],
+};
+
+function render() {
+  if (!prog) return;
+  const since = parseFloat(document.getElementById('since').value);
+  const live = document.getElementById('live').checked;
+  document.getElementById('sinceVal').textContent = since.toFixed(1);
+
+  let iTime, iTimeCursorChange, cx, cy;
+  if (live) {
+    if (startedAt === null) startedAt = performance.now();
+    iTime = (performance.now() - startedAt) / 1000;
+    iTimeCursorChange = iTime - since;
+    cx = mouse.x * canvas.width;
+    cy = (1.0 - mouse.y) * canvas.height; // canvas mouse y-down -> pass through as-is; flip handled by uGhosttyFlip in shader math is for fragCoord only
+  } else {
+    const gx = parseFloat(document.getElementById('gx').value);
+    const gy = parseFloat(document.getElementById('gy').value);
+    iTime = since + 5.0;
+    iTimeCursorChange = iTime - since;
+    cx = (gx * 0.5 + 0.5) * canvas.width;
+    cy = (gy * 0.5 + 0.5) * canvas.height;
+  }
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(prog);
+  gl.uniform2f(uniforms.iResolution, canvas.width, canvas.height);
+  gl.uniform1f(uniforms.iTime, iTime);
+  gl.uniform1f(uniforms.iTimeDelta, 0.016);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(uniforms.iChannel0, 0);
+  gl.uniform2f(uniforms.iCurrentCursor, cx, cy);
+  gl.uniform2f(uniforms.iPreviousCursor, cx, cy);
+  gl.uniform1f(uniforms.iTimeCursorChange, iTimeCursorChange);
+
+  const prevCol = PALETTE[document.getElementById('prevState').value];
+  const curCol = PALETTE[document.getElementById('curState').value];
+  gl.uniform4f(uniforms.iCurrentCursorColor, curCol[0], curCol[1], curCol[2], curCol[3]);
+  gl.uniform4f(uniforms.iPreviousCursorColor, prevCol[0], prevCol[1], prevCol[2], prevCol[3]);
+  gl.uniform1f(uniforms.uGhosttyFlip, document.getElementById('ghosttyFlip').checked ? 1.0 : 0.0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  if (live) requestAnimationFrame(render);
+}
+
+document.getElementById('file').addEventListener('change', (ev) => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  document.getElementById('fileName').textContent = f.name;
+  const reader = new FileReader();
+  reader.onload = () => setShaderSource(reader.result);
+  reader.readAsText(f);
+});
+
+canvas.addEventListener('mousemove', (ev) => {
+  const r = canvas.getBoundingClientRect();
+  mouse.x = (ev.clientX - r.left) / r.width;
+  mouse.y = (ev.clientY - r.top) / r.height;
+});
+
+['since','prevState','curState','gx','gy','ghosttyFlip'].forEach(id =>
+  document.getElementById(id).addEventListener('input', () => { if (!document.getElementById('live').checked) render(); }));
+document.getElementById('live').addEventListener('change', () => { startedAt = null; render(); });
+</script>
+</body>
+</html>

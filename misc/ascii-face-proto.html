@@ -1,0 +1,430 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CABIN-SYSTEM / ascii face</title>
+<style>
+  :root {
+    --bg: #06080a;
+    --panel: #0f1315;
+    --panel-2: #171c1f;
+    --edge: #262e32;
+    --ink: #6f7f86;
+    --hazard: #e2b33c;
+
+    /* CABIN (cyan phosphor) */
+    --l1: #123c39;
+    --l2: #1d6b61;
+    --l3: #2ea497;
+    --l4: #5adcc6;
+    --l5: #c6fff3;
+    --glow: rgba(90, 220, 198, .45);
+    --screen: #04100f;
+  }
+  :root[data-theme="digger"] {
+    --l1: #123d10;
+    --l2: #1d6b18;
+    --l3: #35a527;
+    --l4: #63e04a;
+    --l5: #ccffbb;
+    --glow: rgba(99, 224, 74, .40);
+    --screen: #050f04;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #10161a 0%, var(--bg) 65%);
+    color: var(--ink);
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    display: grid;
+    place-items: center;
+    padding: 24px 16px 40px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .unit { width: min(880px, 100%); }
+
+  /* ---- housing ---- */
+  .housing {
+    position: relative;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--edge);
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.06),
+      0 30px 70px -30px rgba(0,0,0,.9);
+  }
+  .housing::before {
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: 14px;
+    background: repeating-linear-gradient(135deg, transparent 0 26px, rgba(255,255,255,.012) 26px 27px);
+    pointer-events: none;
+  }
+  .screw {
+    position: absolute; width: 7px; height: 7px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #4a5459, #1a1f22 70%);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.6);
+  }
+  .screw.tl { top: 8px; left: 8px; } .screw.tr { top: 8px; right: 8px; }
+  .screw.bl { bottom: 8px; left: 8px; } .screw.br { bottom: 8px; right: 8px; }
+
+  /* ---- screen ---- */
+  .screen {
+    position: relative;
+    border-radius: 8px;
+    background:
+      radial-gradient(120% 120% at 50% 45%, #0a231f 0%, var(--screen) 70%, #010504 100%);
+    border: 1px solid #0a1114;
+    box-shadow: inset 0 0 60px rgba(0,0,0,.85), inset 0 0 0 1px rgba(255,255,255,.03);
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    padding: 18px 8px;
+    cursor: crosshair;
+  }
+  .screen::after { /* scanlines + vignette */
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,.30) 0 1px, transparent 1px 3px),
+      radial-gradient(100% 100% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%);
+    pointer-events: none;
+    mix-blend-mode: multiply;
+  }
+
+  pre#face {
+    margin: 0;
+    font: 400 clamp(6px, 1.45vw, 14px)/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: 0;
+    white-space: pre;
+    user-select: none;
+    color: var(--l1);
+  }
+  #face span { color: var(--l1); }
+  #face .c1 { color: var(--l1); }
+  #face .c2 { color: var(--l2); }
+  #face .c3 { color: var(--l3); }
+  #face .c4 { color: var(--l4); text-shadow: 0 0 6px var(--glow); }
+  #face .c5 { color: var(--l5); text-shadow: 0 0 10px var(--glow), 0 0 22px var(--glow); }
+
+  /* ---- readout strip ---- */
+  .strip {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 12px; padding: 8px 10px;
+    background: #0b0f11;
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  }
+  .hazard {
+    width: 46px; height: 12px; border-radius: 2px; flex: none;
+    background: repeating-linear-gradient(45deg, var(--hazard) 0 4px, #171c1f 4px 8px);
+    opacity: .8;
+  }
+  .strip b { color: var(--l4); font-weight: 500; letter-spacing: .18em; }
+  .strip .bar { flex: 1; height: 3px; background: #171c1f; border-radius: 2px; overflow: hidden; }
+  .strip .bar i { display: block; height: 100%; width: 0%; background: var(--l3); }
+  .strip .serial { color: #47535a; }
+
+  /* ---- controls ---- */
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  button {
+    font: inherit; font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink);
+    background: linear-gradient(180deg, #171c1f, #101416);
+    border: 1px solid var(--edge);
+    border-radius: 5px;
+    padding: 8px 11px;
+    cursor: pointer;
+    transition: color .16s ease, border-color .16s ease, background .16s ease;
+  }
+  button:hover { color: var(--l4); border-color: #37474d; }
+  button[aria-pressed="true"] {
+    color: var(--l5);
+    border-color: var(--l3);
+    background: linear-gradient(180deg, #10201e, #0a1614);
+    box-shadow: 0 0 12px -3px var(--glow);
+  }
+  button:focus-visible { outline: 2px solid var(--l4); outline-offset: 2px; }
+  button .k { color: #47535a; margin-right: 6px; }
+  .spacer { flex: 1; }
+  .note { margin-top: 10px; font-size: 11px; color: #47535a; letter-spacing: .06em; }
+</style>
+
+<div class="unit">
+  <div class="housing">
+    <span class="screw tl"></span><span class="screw tr"></span>
+    <span class="screw bl"></span><span class="screw br"></span>
+
+    <div class="screen" id="screen">
+      <pre id="face" aria-label="ロボットの顔（ASCII表示）" role="img"></pre>
+    </div>
+
+    <div class="strip">
+      <span class="hazard"></span>
+      <span>state <b id="state">smile</b></span>
+      <span class="bar"><i id="morph"></i></span>
+      <span class="serial">LMDT 06899042</span>
+    </div>
+  </div>
+
+  <div class="controls" id="controls">
+    <button data-exp="0" aria-pressed="true"><span class="k">1</span>smile</button>
+    <button data-exp="1"><span class="k">2</span>idle</button>
+    <button data-exp="2"><span class="k">3</span>wink</button>
+    <button data-exp="3"><span class="k">4</span>surprise</button>
+    <button data-exp="4"><span class="k">5</span>angry</button>
+    <button data-exp="5"><span class="k">6</span>sad</button>
+    <button data-exp="6"><span class="k">7</span>sleep</button>
+    <span class="spacer"></span>
+    <button id="auto" aria-pressed="false"><span class="k">a</span>auto</button>
+    <button id="theme"><span class="k">t</span>digger</button>
+  </div>
+  <p class="note">画面の上でポインタを動かすと視線が追従します。キー 1–7 / A / T。</p>
+</div>
+
+<script>
+(() => {
+  const W = 60, H = 28;          // 文字グリッド
+  const AR = 0.6;                // 等幅フォントの字送り / 行送り
+  const RAMP = " .:-=+*#%@";     // 輝度 → 文字
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- grid ---------- */
+  const pre = document.getElementById("face");
+  const cells = new Array(W * H);
+  const prevCh = new Array(W * H).fill("");
+  const prevLv = new Array(W * H).fill(-1);
+  const frag = document.createDocumentFragment();
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const s = document.createElement("span");
+      s.textContent = " ";
+      cells[y * W + x] = s;
+      frag.appendChild(s);
+    }
+    frag.appendChild(document.createTextNode("\n"));
+  }
+  pre.appendChild(frag);
+
+  /* ---------- SDF helpers ---------- */
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const mix = (a, b, t) => a + (b - a) * t;
+  const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+
+  const sdCircle = (px, py, cx, cy, r) => Math.hypot(px - cx, py - cy) - r;
+  const sdRing = (px, py, cx, cy, r, th) => Math.abs(Math.hypot(px - cx, py - cy) - r) - th;
+
+  function sdBox(px, py, cx, cy, bw, bh, rad, rot) {
+    let dx = px - cx, dy = py - cy;
+    if (rot) { const c = Math.cos(rot), s = Math.sin(rot); const nx = dx * c - dy * s; dy = dx * s + dy * c; dx = nx; }
+    const qx = Math.abs(dx) - bw + rad, qy = Math.abs(dy) - bh + rad;
+    return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rad;
+  }
+  // 円弧: 中心角 ac / 半開き ap（画面座標なので y は下向き正）
+  function sdArc(px, py, cx, cy, r, th, ac, ap) {
+    const dx = px - cx, dy = py - cy;
+    const len = Math.hypot(dx, dy);
+    let d = Math.atan2(dy, dx) - ac;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    if (Math.abs(d) <= ap) return Math.abs(len - r) - th;
+    const ex = cx + Math.cos(ac + ap) * r, ey = cy + Math.sin(ac + ap) * r;
+    const fx = cx + Math.cos(ac - ap) * r, fy = cy + Math.sin(ac - ap) * r;
+    return Math.min(Math.hypot(px - ex, py - ey), Math.hypot(px - fx, py - fy)) - th;
+  }
+
+  const EX = 0.46, EY = -0.30;   // 目の基準位置
+  const TH = 0.052;              // 線の太さ
+
+  /* ---------- expressions ----------
+     eyes / mouth を別フィールドで返す。瞬きは eyes のみを閉じ目に補間するため。 */
+  const arcEye = (px, py, sx, gx, gy) =>
+    sdArc(px, py, sx * EX + gx, EY + 0.09 + gy, 0.155, TH, -Math.PI / 2, 1.15);
+  const roundEye = (px, py, sx, gx, gy, r = 0.115) =>
+    sdBox(px, py, sx * EX + gx, EY + gy, r, r * 1.05, r * 0.8);
+  const slitEye = (px, py, sx, gx, gy, rot) =>
+    sdBox(px, py, sx * EX + gx, EY + gy, 0.17, 0.035, 0.03, sx * rot);
+  const closedEye = (px, py, sx, gx, gy) =>
+    sdBox(px, py, sx * EX + gx, EY + 0.02 + gy, 0.16, 0.018, 0.018, 0);
+
+  const smileMouth = (px, py, w) => sdArc(px, py, 0, 0.05, w, TH, Math.PI / 2, 0.85);
+  const frownMouth = (px, py, w) => sdArc(px, py, 0, 0.78, w, TH, -Math.PI / 2, 0.70);
+
+  const EXPR = [
+    { name: "smile",
+      eyes: (p, g) => Math.min(arcEye(p.x, p.y, -1, g.x, g.y), arcEye(p.x, p.y, 1, g.x, g.y)),
+      mouth: (p) => smileMouth(p.x, p.y, 0.46) },
+
+    { name: "idle",
+      eyes: (p, g) => Math.min(roundEye(p.x, p.y, -1, g.x, g.y), roundEye(p.x, p.y, 1, g.x, g.y)),
+      mouth: (p) => smileMouth(p.x, p.y, 0.30) },
+
+    { name: "wink",
+      eyes: (p, g) => Math.min(arcEye(p.x, p.y, -1, g.x, g.y), roundEye(p.x, p.y, 1, g.x, g.y)),
+      mouth: (p) => smileMouth(p.x, p.y, 0.40) },
+
+    { name: "surprise",
+      eyes: (p, g) => Math.min(roundEye(p.x, p.y, -1, g.x, g.y, 0.165), roundEye(p.x, p.y, 1, g.x, g.y, 0.165)),
+      mouth: (p) => sdRing(p.x, p.y, 0, 0.36, 0.10, 0.045) },
+
+    { name: "angry",
+      eyes: (p, g) => Math.min(slitEye(p.x, p.y, -1, g.x, g.y, 0.42), slitEye(p.x, p.y, 1, g.x, g.y, 0.42)),
+      mouth: (p) => frownMouth(p.x, p.y, 0.34) },
+
+    { name: "sad",
+      eyes: (p, g) => Math.min(slitEye(p.x, p.y, -1, g.x, g.y + 0.03, -0.38), slitEye(p.x, p.y, 1, g.x, g.y + 0.03, -0.38)),
+      mouth: (p) => frownMouth(p.x, p.y, 0.26) },
+
+    { name: "sleep",
+      eyes: (p, g) => Math.min(closedEye(p.x, p.y, -1, g.x, g.y), closedEye(p.x, p.y, 1, g.x, g.y)),
+      mouth: (p) => sdBox(p.x, p.y, 0.02, 0.36, 0.055, 0.02, 0.02, 0) },
+  ];
+  const blinkEyes = (p, g) => Math.min(closedEye(p.x, p.y, -1, g.x, g.y), closedEye(p.x, p.y, 1, g.x, g.y));
+
+  /* ---------- state ---------- */
+  let from = 0, to = 0, t = 1;
+  let tPrev = performance.now();
+  const MORPH_MS = reduce ? 180 : 460;
+  let auto = false, autoTimer = 0;
+  let blink = 0, blinkTimer = 2.2;
+  let gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 };
+  let glitch = 0;
+  const p = { x: 0, y: 0 };
+
+  const easeInOut = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+  const stateEl = document.getElementById("state");
+  const morphEl = document.getElementById("morph");
+
+  function setExpr(i) {
+    if (i === to) return;
+    from = to; to = i; t = 0;
+    if (!reduce) glitch = 0.9;
+    stateEl.textContent = EXPR[i].name;
+    document.querySelectorAll("[data-exp]").forEach(b =>
+      b.setAttribute("aria-pressed", String(+b.dataset.exp === i)));
+  }
+
+  /* ---------- render ---------- */
+  let acc = 0;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - tPrev) / 1000);
+    tPrev = now;
+    acc += dt;
+
+    if (t < 1) t = Math.min(1, t + dt * 1000 / MORPH_MS);
+    glitch = Math.max(0, glitch - dt * 2.6);
+
+    // 瞬き
+    if (!reduce) {
+      blinkTimer -= dt;
+      if (blinkTimer <= 0) { blinkTimer = 2.5 + Math.random() * 4; blink = 1e-3; }
+      if (blink > 0) {
+        blink += dt * 7.5;
+        if (blink >= 2) blink = 0;
+      }
+    }
+    const blinkAmt = blink > 0 ? (blink < 1 ? blink : 2 - blink) : 0;
+
+    // オート切替
+    // 2026-07-12: SLEEP(index 6) を一旦オート循環の対象から除外（要望により無効化中）。
+    // 手動選択（キー7）は引き続き可能。元に戻す場合は AUTO_EXCLUDE を空配列にする。
+    const AUTO_EXCLUDE = [6];
+    if (auto) {
+      autoTimer -= dt;
+      if (autoTimer <= 0) {
+        autoTimer = 2.4 + Math.random() * 1.6;
+        let n; do { n = (Math.random() * EXPR.length) | 0; } while (n === to || AUTO_EXCLUDE.includes(n));
+        setExpr(n);
+      }
+    }
+
+    // 視線・呼吸
+    gaze.x += (gazeT.x * 0.07 - gaze.x) * Math.min(1, dt * 6);
+    gaze.y += (gazeT.y * 0.05 - gaze.y) * Math.min(1, dt * 6);
+    const breathe = reduce ? 0 : Math.sin(acc * 1.6) * 0.012;
+
+    const et = easeInOut(t);
+    const A = EXPR[from], B = EXPR[to];
+    const s = 2 / H;
+    const cx = (W - 1) / 2, cy = (H - 1) / 2;
+    const g = gaze;
+
+    morphEl.style.width = (et * 100).toFixed(0) + "%";
+
+    for (let y = 0; y < H; y++) {
+      // トランジション中のみ、行単位で微小な水平ズレ（グリッチ）
+      const jitter = glitch > 0.05 && Math.random() < glitch * 0.18
+        ? (Math.random() < 0.5 ? -1 : 1) : 0;
+
+      for (let x = 0; x < W; x++) {
+        p.x = (x + jitter - cx) * AR * s;
+        p.y = (y - cy) * s + breathe;
+
+        let de = mix(A.eyes(p, g), B.eyes(p, g), et);
+        if (blinkAmt > 0) de = mix(de, blinkEyes(p, g), blinkAmt);
+        const dm = mix(A.mouth(p, g), B.mouth(p, g), et);
+        const d = Math.min(de, dm);
+
+        // 距離場 → 輝度（コア + ブルーム）
+        let v = smoothstep(0.035, -0.015, d) + Math.exp(-Math.max(d, 0) * 9) * 0.45;
+        if (!reduce) {
+          v += (Math.random() - 0.5) * 0.055;                 // ディザ
+          v *= 0.94 + 0.06 * Math.sin(acc * 9 + y * 0.9);      // 走査ムラ
+          if (glitch > 0.05 && Math.random() < glitch * 0.02) v += 0.5;
+        }
+        v = clamp(v, 0, 1);
+
+        const idx = v < 0.07 ? 0 : Math.min(RAMP.length - 1, Math.floor(v * RAMP.length));
+        const ch = RAMP[idx];
+        const lv = idx === 0 ? 0 : Math.min(5, 1 + Math.floor((idx - 1) / 2));
+
+        const i = y * W + x;
+        if (prevCh[i] !== ch) { cells[i].textContent = ch; prevCh[i] = ch; }
+        if (prevLv[i] !== lv) { cells[i].className = "c" + lv; prevLv[i] = lv; }
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ---------- input ---------- */
+  const screen = document.getElementById("screen");
+  screen.addEventListener("pointermove", (e) => {
+    const r = screen.getBoundingClientRect();
+    gazeT.x = clamp(((e.clientX - r.left) / r.width - 0.5) * 2, -1, 1);
+    gazeT.y = clamp(((e.clientY - r.top) / r.height - 0.5) * 2, -1, 1);
+  });
+  screen.addEventListener("pointerleave", () => { gazeT.x = 0; gazeT.y = 0; });
+
+  document.getElementById("controls").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.exp !== undefined) { auto = false; autoBtn.setAttribute("aria-pressed", "false"); setExpr(+b.dataset.exp); }
+  });
+
+  const autoBtn = document.getElementById("auto");
+  autoBtn.addEventListener("click", () => {
+    auto = !auto; autoTimer = 0.2;
+    autoBtn.setAttribute("aria-pressed", String(auto));
+  });
+
+  const themeBtn = document.getElementById("theme");
+  themeBtn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "digger" ? "" : "digger";
+    document.documentElement.dataset.theme = next;
+    themeBtn.lastChild.textContent = next === "digger" ? "cabin" : "digger";
+  });
+
+  addEventListener("keydown", (e) => {
+    const n = "1234567".indexOf(e.key);
+    if (n >= 0) { auto = false; autoBtn.setAttribute("aria-pressed", "false"); setExpr(n); }
+    if (e.key.toLowerCase() === "a") autoBtn.click();
+    if (e.key.toLowerCase() === "t") themeBtn.click();
+  });
+})();
+</script>
