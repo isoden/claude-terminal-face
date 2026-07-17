@@ -1,4 +1,4 @@
-# ascii-face
+# claude-terminal-face
 
 フィクション作品に見られる「機械的なボディ + 記号化された発光顔（ドットマトリクス / ASCII）」というモチーフをターミナルで再現+Claude Codeと連携させるプロトタイプ。
 

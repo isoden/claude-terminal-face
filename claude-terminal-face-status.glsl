@@ -1,5 +1,5 @@
 // ============================================================================
-//  ascii-face.glsl — Ghostty custom shader（exit code 連携版）
+//  claude-terminal-face.glsl — Ghostty custom shader（exit code 連携版）
 //
 //  端末の背後に ASCII ドット文字でロボットの顔を描く。表情は SDF の重み付き
 //  補間なので、状態が変わると形状が連続的にモーフする。
@@ -26,7 +26,7 @@
 //  時間的に排他で、同じチャンネルを取り合わない。
 //
 //  ~/.config/ghostty/config
-//    custom-shader = ~/.config/ghostty/shaders/ascii-face-status.glsl
+//    custom-shader = ~/.config/ghostty/shaders/claude-terminal-face-status.glsl
 //    custom-shader-animation = always
 // ============================================================================
 

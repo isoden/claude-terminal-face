@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  claude-face-hook.sh — Claude Code hooks → ascii-face-status.glsl 状態連携
+#  claude-face-hook.sh — Claude Code hooks → claude-terminal-face-status.glsl 状態連携
 #
 #  Claude Code の hook イベント（PreToolUse/PostToolUse/UserPromptSubmit/Stop）
 #  を受け取り、作業状態(idle/thinking/working/done/err)を OSC 12（カーソル色

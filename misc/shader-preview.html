@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>ascii-face shader preview</title>
+<title>claude-terminal-face shader preview</title>
 <style>
   body { background:#111; color:#eee; font-family:monospace; padding: 8px; }
   canvas { background:#000; border:1px solid #444; image-rendering:pixelated; }
@@ -14,7 +14,7 @@
 </style>
 </head>
 <body>
-<h3 style="margin:4px 0 12px">ascii-face shader preview</h3>
+<h3 style="margin:4px 0 12px">claude-terminal-face shader preview</h3>
 
 <div class="row">
   <label>shader file: <input id="file" type="file" accept=".glsl,.frag,.txt"></label>
@@ -151,7 +151,7 @@ function setShaderSource(src) {
   }
 }
 
-// ascii-face-status.glsl の FACE_COL/THINK_COL/WORK_COL/DONE_COL/ERR_COL と同じ値。
+// claude-terminal-face-status.glsl の FACE_COL/THINK_COL/WORK_COL/DONE_COL/ERR_COL と同じ値。
 // 値を変えたらシェーダー側とここを両方更新すること（spec.md §7.4 と同種の二重管理）。
 const PALETTE = {
   idle:     [0.36, 0.88, 0.79, 1.0],

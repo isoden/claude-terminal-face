@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 An ASCII-art robot face (PRAGMATA/Stellar Blade "digital cabin face" motif) implemented twice:
-in-browser (`misc/ascii-face-proto.html`) and as a Ghostty terminal-background custom shader
-(`ascii-face.glsl`, `ascii-face-status.glsl`). **`docs/SPEC.md` is the authoritative design doc** —
+in-browser (`misc/claude-terminal-face-proto.html`) and as a Ghostty terminal-background custom shader
+(`claude-terminal-face.glsl`, `claude-terminal-face-status.glsl`). **`docs/SPEC.md` is the authoritative design doc** —
 read it before making non-trivial changes; it documents the rationale, constraints, and known
 issues in detail. Don't duplicate its content here; this file only covers what you need to start
 working productively.
@@ -16,8 +16,8 @@ working productively.
 This is a dependency-free static project — no `package.json`, no bundler, no linter, no test
 suite. There is nothing to `npm install` or `npm run build`.
 
-- **`misc/ascii-face-proto.html`**: open the file directly in a browser.
-- **`ascii-face.glsl` / `ascii-face-status.glsl`**: these cannot be "run" standalone — they are
+- **`misc/claude-terminal-face-proto.html`**: open the file directly in a browser.
+- **`claude-terminal-face.glsl` / `claude-terminal-face-status.glsl`**: these cannot be "run" standalone — they are
   Ghostty custom shaders (Shadertoy-style `mainImage`) meant to be referenced from
   `~/.config/ghostty/config` via `custom-shader = ...`. Ghostty hot-reloads custom shaders on
   save (1.2.0+), but the intended runtime is a real Ghostty terminal, not a browser.
@@ -62,7 +62,7 @@ EOF
 cat > footer.glsl <<'EOF'
 void main() { mainImage(_fragColor, gl_FragCoord.xy); }
 EOF
-cat header.glsl /path/to/repo/ascii-face-status.glsl footer.glsl > test.frag
+cat header.glsl /path/to/repo/claude-terminal-face-status.glsl footer.glsl > test.frag
 glslang --target-env vulkan1.2 -S frag test.frag   # exit 0 = OK
 ```
 
@@ -80,21 +80,21 @@ done by lerping distance values (`d = mix(sdf_A, sdf_B, t)`), not by cross-fadin
 mouth are separate SDF fields (`min(eyes, mouth)`) so blinking can blend just the eye field while
 the mouth keeps its current shape. Face space is centered at origin with **y positive = down**;
 shared layout constants (`EX`, `EY`, `TH`, mouth arc centers) are duplicated across
-`misc/ascii-face-proto.html` (JS) and both `.glsl` files — changing one without the others causes visible
+`misc/claude-terminal-face-proto.html` (JS) and both `.glsl` files — changing one without the others causes visible
 drift (docs/SPEC.md §7.4 tracks this as a known issue; there's no single source of truth yet).
 
 Luminance is derived from the distance field (core + exponential bloom) and quantized into an
 ASCII ramp `" .:-+=*%#@"` — this softens sub-cell motion into perceived brightness changes rather
 than jaggy 1-cell jumps.
 
-### `misc/ascii-face-proto.html`
+### `misc/claude-terminal-face-proto.html`
 
 Plain JS + DOM, no framework. A `<pre>` of `60×28` pre-created `<span>` cells is mutated
 per-frame; only cells whose character/level actually changed are touched (`prevCh`/`prevLv`
 caches) — `innerHTML` is never rewritten. 7 expressions are defined in the `EXPR` array as
 `{eyes, mouth}` SDF functions; `setExpr()` drives a `from → to` morph over `MORPH_MS`.
 
-### `ascii-face.glsl` / `ascii-face-status.glsl`
+### `claude-terminal-face.glsl` / `claude-terminal-face-status.glsl`
 
 Ghostty custom shaders are **stateless** Shadertoy-style fragment shaders — no persistent state
 between frames, no arbitrary texture inputs. Two consequences that shape the code:
@@ -106,7 +106,7 @@ between frames, no arbitrary texture inputs. Two consequences that shape the cod
   keypress) rather than actual stored state — `faceField()` computes SMILE/IDLE/SLEEP blend
   weights from elapsed time every frame (docs/SPEC.md §3.4).
 
-`ascii-face-status.glsl` additionally reacts to shell command exit codes, which Ghostty shaders
+`claude-terminal-face-status.glsl` additionally reacts to shell command exit codes, which Ghostty shaders
 have no direct access to. The workaround: the shell prompt encodes `$status` into the terminal
 **cursor color** via OSC 12, and the shader reads `iCurrentCursorColor`/`iPreviousCursorColor` to
 derive an `err` blend weight toward a SAD expression (docs/SPEC.md §5). This is a real side channel
