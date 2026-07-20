@@ -6,7 +6,8 @@
 //
 //  表情の決まり方:
 //    平常時              → IDLE（バリアントが一定周期で切り替わる）
-//    Claude Code が調査/プランニング中 → THINK（頭上に「?」が浮かび左右に漂う）
+//    Claude Code が調査/プランニング中 → THINK（頭上に「?」が浮かび左右に漂う。
+//                                          ただし顎に手を当てる表情のときは出ない）
 //    Claude Code が実装（Edit/Write/Bash）中 → WORK（汗の粒が飛び散る）
 //    Claude Code の応答完了 → DONE（ウィンクに同期してキラキラが散る）
 //    直前のコマンドが失敗 → ERR（困り顔）
@@ -289,6 +290,8 @@ float errMouth(vec2 p) {
 // 2026-07-14: 各フェーズ（idle/think/work/done）に 3 表情を持たせ、VAR_PERIOD
 // ごとに hash で次の表情を選ぶ。完全ランダムで、連続して同じ表情が選ばれるのも
 // 許容（ユーザー要件）。err は 1 表情のまま（要件外）。
+// 2026-07-20: think のみ 4 表情（🤔 の「顎に手を当てる」を追加）。バリアント数は
+// pickVar の n 引数でフェーズごとに指定する。
 // - 選択は iTime 基準（デコレーション同様、打鍵に左右されない iTime 純関数の
 //   ループ）。2026-07-20 に打鍵依存を全廃したので、これが顔全体の唯一の流儀。
 // - 区間先頭 VAR_MORPH の間、前区間の表情から SDF morph する（表情遷移 =
@@ -304,6 +307,8 @@ float errMouth(vec2 p) {
 //   think（思案）   v0 伏し目(浅い∪弧)+「へ」の口 … 視線を落として考え込む
 //                   v1 同方向に傾いた細目+すぼめ口 … 「本当か?」と訝る
 //                   v2 ○輪郭の見開き目+「お」のリング口 … ひらめき寸前に息を呑む
+//                   v3 斜め上への逸らし目(左右非対称)+右寄せの結び口+顎に添えた左手
+//                      … 🤔 の「指を顎に当てて考える」（2026-07-20 追加）
 //   work（奮闘）    v0 片目つぶり+○スコープ目+横に引き結ぶ口 … 照準を合わせる職人
 //                   v1 ＞＜目+厚く結んだ口   … 全力で食いしばる
 //                   v2 縦バー目+小さな口     … ロボット的に無心で凝視
@@ -314,10 +319,29 @@ float errMouth(vec2 p) {
 //   - 各フェーズの雰囲気（idle=穏やか/think=思案/work=奮闘/done=得意）から
 //     外れない範囲で振れ幅を作る。フェーズ判別が表情バリアントで曖昧に
 //     ならないよう、色とデコレーション（?/汗/キラキラ）は全バリアント共通。
+//     唯一の例外が think v3（顎に手）で、要素過多を避けるため「?」を出さない
+//     （2026-07-20。判断の詳細は mainImage の該当行のコメント）。色は共通なので
+//     フェーズ判別は保たれる。
 const float VAR_PERIOD = 7.0;   // @tweak 2.0 20.0  1 表情の保持時間（秒）
 const float VAR_MORPH  = 0.09;  // @tweak 0.01 0.4  区間頭の morph 割合（≈0.63s）
 
-float pickVar(float i, float seed) { return floor(hash(vec2(i, seed)) * 3.0); }
+// n = そのフェーズのバリアント数。think だけ 4（顎に手を当てる🤔 を追加）で他は 3。
+// hash が厳密に 1.0 を返すと floor(hash*n)==n になるが、各テーブルの末尾が
+// else 節（v が上限以上なら最後のバリアント）なので範囲外にはならない。
+float pickVar(float i, float seed, float n) { return floor(hash(vec2(i, seed)) * n); }
+
+// think バリアントの「顎に手」(v3) が占める割合（0..1）。faceField と mainImage の
+// 両方が必要とするため関数に切り出す（faceField は表情の合成、mainImage は
+// デコレーションの抑制。同じ選択ロジックを 2 か所に書くと必ず片方だけ直し忘れる）。
+// morph 中は前後バリアントの混合比 vf をそのまま返し、「?」がフェードで消えるようにする。
+const float THINK_SEED = 33.1;
+float thinkHandMix(float t) {
+    float vi = floor(t / VAR_PERIOD);
+    float vf = smoothstep(0.0, VAR_MORPH, fract(t / VAR_PERIOD));
+    float a = pickVar(vi - 1.0, THINK_SEED, 4.0) > 2.5 ? 1.0 : 0.0;
+    float b = pickVar(vi,       THINK_SEED, 4.0) > 2.5 ? 1.0 : 0.0;
+    return mix(a, b, vf);
+}
 
 // -- バリアント用の新パーツ --
 float sdRing(vec2 p, vec2 c, float r, float th) { return abs(length(p - c) - r) - th; }
@@ -394,7 +418,60 @@ float laughMouth(vec2 p) {  // 下半円の塗り潰し ▽（口を開けた笑
     return max(d, 0.26 - p.y);  // 円の上半分をカット（max = SDF の交差）
 }
 
-// -- 各フェーズの表情テーブル（2026-07-14 全 12 表情を新規デザイン）--
+// 🤔 の手（think v3 専用）。指ピストルの形の手を口の真下（顎）に添える。
+// 目・口と違い顔の輪郭外まで伸びるパーツなので、口の SDF 側（dm）に min() で
+// 合流させる（顔本体は目と口の 2 フィールドしか持たないため。docs/SPEC.md §10.1）。
+// 手の重心は顔の中心より左（🤔 と同じ側）に置き、同バリアントの口は右へ振る。
+// 手と口を縦にも横にもずらすことで、ブルーム（exp(-9d)）が重なって「口 + 手」が
+// 一塊の団子に潰れるのを避ける。
+//
+// 形は「指ピストル」を横に構えた向き。位置関係は 親指 = 上 / 人差し指 = 横（顔側へ）/
+// 握り = 下。この L 字のシルエットそのものが手だと分かる手掛かりになる。
+//
+// 「指（手）に見えない」対策の経緯（2026-07-20。すべてプレビューで実測）:
+//   - 縦バー + 塗り潰しの塊: 塊が手の部位に読めない。輪郭に親指を足しても、
+//     塗り潰しは ASCII では濃い矩形で、1〜2 セルの非対称は知覚されない
+//   - 折り曲げた指を平行バーで並べる（横 3 本 / 縦 3 本の櫛）: パーツを増やすほど
+//     ブルームで融合して情報が消える。ブルーム（exp(-9d)*0.45）は距離 0.05 でも
+//     輝度 0.29 残るため、間隔 0.11 でも隙間は 1 桁しか残らなかった
+//   → 結論: この解像度でディテールを増やすのは逆効果。パーツを 3 つに絞り、
+//     「向きが明確に違う 2 本の指 + 角の握り」という L 字の骨格だけを描く。
+float chinHand(vec2 p, float t) {
+    // 指のトントン: 顎を軽く叩くリズム。0→1 の周期の頭 25% だけ持ち上げて戻す
+    // （常時揺らすと「震え」に見え、思案の落ち着きが出ない）。振幅 0.018 は
+    // ASCII 1 セル未満で、輝度のにじみとして知覚される程度に抑えている。
+    float tap = sin(3.14159265 * clamp(fract(t / 1.45) / 0.25, 0.0, 1.0)) * 0.018;
+    // 手全体を手首（指の付け根）を軸に少し起こす。個々のパーツを回すのではなく
+    // 入力座標を回すのは、パーツごとの回転だと相対位置が崩れて関節が外れるため。
+    // 0.16rad ≈ 9°: 指先が顎へ向かう「あおり」が出るぎりぎりの角度で、これ以上
+    // 傾けると横向きの人差し指が斜めの棒に見えて L 字が崩れる。
+    const vec2  PIVOT = vec2(-0.360, 0.520);
+    const float TILT  = 0.16;
+    // 手の位置。🤔 に合わせて口の真下（顎）へ置く。x: 指先が口の下に来る量、
+    // y: 指の上端と口の下端（0.415）の間を 0.05 以上空ける量。詰めるとブルームで
+    // 口と手が繋がって団子になる。下げ過ぎると握りが画面下端で欠ける（下記参照）。
+    const vec2  OFFSET = vec2(0.190, 0.045);
+    vec2 q = p - OFFSET - PIVOT;
+    q = vec2(q.x * cos(TILT) - q.y * sin(TILT), q.x * sin(TILT) + q.y * cos(TILT)) + PIVOT;
+    q.y -= tap;
+    // 人差し指: 横に伸ばし、指先を顎（口の斜め下）へ向ける。
+    // 長さは他のパーツの倍以上あり、L 字の長辺になる。
+    float d = sdBox(q, vec2(-0.240, 0.500), vec2(0.180, 0.028), 0.026, 0.0);
+    // 親指: 人差し指の付け根から真上へ起こす。この 2 本の直角が「指ピストル」を
+    // 成立させるので、他のパーツより優先して角度差を確保する。長さは人差し指の
+    // 半分以下（全長 0.14）に留める。これより伸ばすと指 2 本が同格に見えて
+    // 「立てた親指」ではなく「V サイン」に読める。
+    d = min(d, sdBox(q, vec2(-0.360, 0.430), vec2(0.028, 0.070), 0.026, 0.0));
+    // 握り込んだ残りの指: 人差し指の真下に密着させる塊（間に隙間を作ると指と拳が
+    // 別物に見える）。ディテールは持たせず「拳の重み」としてだけ効かせる。
+    // 下端は回転・OFFSET 込みで ≈ 0.70。これより下げるとブルーム込みで画面下端
+    // （顔空間で ±0.8 前後。縦横比とドリフト次第）を割り、実機で欠ける。
+    d = min(d, sdBox(q, vec2(-0.330, 0.598), vec2(0.126, 0.058), 0.052, 0.0));
+    return d;
+}
+
+// -- 各フェーズの表情テーブル（2026-07-14 に 12 表情を新規デザイン、
+//    2026-07-20 に think v3「顎に手」を追加して 13）--
 float idleEyesVar(vec2 p, vec2 g, float v) {
     if (v < 0.5) return min(halfLidEye(p, -1.0, g, 0.12, 0.0), halfLidEye(p, 1.0, g, 0.12, 0.0));
     if (v < 1.5) {  // よそ見: 視線が斜め上へ逸れる
@@ -413,12 +490,20 @@ float idleMouthVar(vec2 p, float v) {
 float thinkEyesVar(vec2 p, vec2 g, float v) {
     if (v < 0.5) return min(downcastEye(p, -1.0, g), downcastEye(p, 1.0, g));     // 伏し目
     if (v < 1.5) return min(tiltEye(p, -1.0, g, 0.22), tiltEye(p, 1.0, g, 0.22)); // 訝しげ
-    return min(ringEye(p, -1.0, g, 0.115), ringEye(p, 1.0, g, 0.115));            // ○見開き
+    if (v < 2.5) return min(ringEye(p, -1.0, g, 0.115), ringEye(p, 1.0, g, 0.115)); // ○見開き
+    // 🤔: 視線を手と反対の斜め上へ逸らし、手を添える側（左）の目を細める左右非対称。
+    // 眉が無い顔なので、🤔 の「片眉を上げた」ニュアンスは目の左右差で代替する。
+    vec2 gu = g + vec2(0.05, -0.06);
+    return min(sdBox(p, vec2(-EX + gu.x, EY + 0.02 + gu.y), vec2(0.135, 0.026), 0.026, -0.14),
+               halfLidEye(p, 1.0, gu, 0.125, 0.0));
 }
-float thinkMouthVar(vec2 p, float v) {
+float thinkMouthVar(vec2 p, float t, float v) {
     if (v < 0.5) return chevMouth(p);
     if (v < 1.5) return sdBox(p, vec2(-0.10, 0.42), vec2(0.06, 0.02), 0.02, 0.18);  // 口をすぼめて横へ
-    return sdRing(p, vec2(0.0, 0.40), 0.080, 0.038);  // 「お」と息を呑む（穴を残す径。上と同根拠）
+    if (v < 2.5) return sdRing(p, vec2(0.0, 0.40), 0.080, 0.038);  // 「お」と息を呑む（穴を残す径。上と同根拠）
+    // 🤔: 口を右へ寄せて斜めに結ぶ（手は左にあるので反対側へ逃がす）+ 顎に添えた手。
+    return min(sdBox(p, vec2(0.085, 0.395), vec2(0.075, 0.020), 0.020, 0.16),
+               chinHand(p, t));
 }
 float workEyesVar(vec2 p, vec2 g, float v) {
     if (v < 0.5) {  // 照準: 片目を閉じ、開いた方は○スコープで狙う
@@ -601,7 +686,7 @@ float faceField(vec2 p, vec2 g, float t,
     float de = 0.0, dm = 0.0;
 
     if (wIdleS > 0.004) {
-        float vA = pickVar(vi - 1.0, 21.7), vB = pickVar(vi, 21.7);
+        float vA = pickVar(vi - 1.0, 21.7, 3.0), vB = pickVar(vi, 21.7, 3.0);
         float eG = mix(idleEyesVar(p, g, vA), idleEyesVar(p, g, vB), vf);
         float mG = mix(idleMouthVar(p, vA), idleMouthVar(p, vB), vf);
 
@@ -629,17 +714,17 @@ float faceField(vec2 p, vec2 g, float t,
         dm += wIdleS * mG;
     }
     if (wThinkS > 0.004) {
-        float vA = pickVar(vi - 1.0, 33.1), vB = pickVar(vi, 33.1);
+        float vA = pickVar(vi - 1.0, THINK_SEED, 4.0), vB = pickVar(vi, THINK_SEED, 4.0);
         de += wThinkS * mix(thinkEyesVar(p, g, vA), thinkEyesVar(p, g, vB), vf);
-        dm += wThinkS * mix(thinkMouthVar(p, vA), thinkMouthVar(p, vB), vf);
+        dm += wThinkS * mix(thinkMouthVar(p, t, vA), thinkMouthVar(p, t, vB), vf);
     }
     if (wWorkS > 0.004) {
-        float vA = pickVar(vi - 1.0, 47.9), vB = pickVar(vi, 47.9);
+        float vA = pickVar(vi - 1.0, 47.9, 3.0), vB = pickVar(vi, 47.9, 3.0);
         de += wWorkS * mix(workEyesVar(p, g, vA), workEyesVar(p, g, vB), vf);
         dm += wWorkS * mix(workMouthVar(p, vA), workMouthVar(p, vB), vf);
     }
     if (wDoneS > 0.004) {
-        float vA = pickVar(vi - 1.0, 59.3), vB = pickVar(vi, 59.3);
+        float vA = pickVar(vi - 1.0, 59.3, 3.0), vB = pickVar(vi, 59.3, 3.0);
         de += wDoneS * mix(doneEyesVar(p, g, t, vA), doneEyesVar(p, g, t, vB), vf);
         dm += wDoneS * mix(doneMouthVar(p, vA), doneMouthVar(p, vB), vf);
     }
@@ -736,7 +821,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float v = fieldLum(d);
     // 状態デコレーションを輝度側で加算（faceField に混ぜない理由はデコレーション
     // ブロック冒頭のコメント参照）。重みがほぼ 0 の状態は評価自体を省く。
-    if (wThinkS > 0.004) v += wThinkS * thinkDecoLum(p, iTime);
+    // 「?」は顎に手を当てるバリアント(v3)では出さない。手・口・目に加えて頭上の
+    // 「?」まで乗ると要素が多すぎて画面がうるさく、手の形も読み取りにくくなる
+    // （2026-07-20）。フェーズ判別のためデコレーションは全バリアント共通、という
+    // 原則（docs/SPEC.md §10.2）の唯一の例外。色（THINK_TINT）は共通のままなので
+    // フェーズの判別自体は保たれる。
+    if (wThinkS > 0.004) v += wThinkS * (1.0 - thinkHandMix(iTime)) * thinkDecoLum(p, iTime);
     if (wWorkS  > 0.004) v += wWorkS  * workDecoLum(p, iTime);
     if (wDoneS  > 0.004) v += wDoneS  * doneDecoLum(p, iTime);
     v *= 0.94 + 0.06 * sin(iTime * 8.0 + cellId.y * 0.9);

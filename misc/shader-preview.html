@@ -69,8 +69,9 @@
         <option value="0">variant 0</option>
         <option value="1">variant 1</option>
         <option value="2">variant 2</option>
+        <option value="3">variant 3（think のみ。他フェーズは v2 と同じ絵になる）</option>
       </select></span></div>
-      <div class="note">各フェーズが持つ 3 表情のうち 1 つに固定する（呼吸・ドリフト・瞬き等の動きはそのまま）。ロード時に pickVar() の定義を差し替えて実現しているので、実機のシェーダーには影響しない。err はバリアントを持たないので無影響。</div>
+      <div class="note">各フェーズが持つ表情（think は 4、他は 3）のうち 1 つに固定する（呼吸・ドリフト・瞬き等の動きはそのまま）。ロード時に pickVar() の定義を差し替えて実現しているので、実機のシェーダーには影響しない。err はバリアントを持たないので無影響。</div>
     </div>
 
     <div class="folder" id="tweakFolder" style="display:none">
@@ -149,7 +150,7 @@ uniform vec4 iCurrentCursorColor;
 uniform vec4 iPreviousCursorColor;
 uniform float iTimeCursorChange;
 uniform float uGhosttyFlip; // 1.0 = Ghostty の実挙動（fragCoord.y が上原点・下向き正）を再現
-uniform float uVarLock;     // <0 = シェーダー本来の巡回、0/1/2 = そのバリアントに固定
+uniform float uVarLock;     // <0 = シェーダー本来の巡回、0..3 = そのバリアントに固定
 out vec4 outColor;
 
 ${patchTweaks(patchVariantLock(shaderBody))}
@@ -164,19 +165,23 @@ void main() {
 `;
 }
 
-// フェーズ内の 3 表情は pickVar() だけが選んでいる（idle/think/work/done は
-// seed 違いで同じ関数を呼ぶ）ので、その 1 関数を差し替えれば全フェーズを一律に
-// 固定できる。Ghostty のカスタムシェーダーには任意の uniform を渡す手段がなく、
+// フェーズ内の表情バリアントは pickVar() だけが選んでいる（idle/think/work/done は
+// seed とバリアント数違いで同じ関数を呼ぶ）ので、その 1 関数を差し替えれば全フェーズを
+// 一律に固定できる。Ghostty のカスタムシェーダーには任意の uniform を渡す手段がなく、
 // シェーダー本体にデバッグ用スイッチを足すことはできないため、プレビュー側で
 // ロード時にソースへ注入する。定義行が変わったら（1 行完結でなくなった等）
 // マッチしなくなるので、その場合は黙って無効化せず UI で知らせる。
-const PICKVAR_RE = /^([ \t]*)float\s+pickVar\s*\(\s*float\s+(\w+)\s*,\s*float\s+(\w+)\s*\)\s*\{(.*)\}[ \t]*$/m;
+// 2026-07-20: 引数が増えても（think の 4 バリアント化で n が追加された）壊れないよう、
+// 個別の引数名ではなく引数リストごとキャプチャして転送する形にした。
+const PICKVAR_RE = /^([ \t]*)float\s+pickVar\s*\(([^)]*)\)\s*\{(.*)\}[ \t]*$/m;
 let varLockPatched = false;
 function patchVariantLock(src) {
   varLockPatched = PICKVAR_RE.test(src);
-  return src.replace(PICKVAR_RE, (_m, indent, a, b, body) =>
-    `${indent}float pickVarAuto_(float ${a}, float ${b}) {${body}}\n` +
-    `${indent}float pickVar(float ${a}, float ${b}) { return uVarLock < 0.0 ? pickVarAuto_(${a}, ${b}) : uVarLock; }`);
+  return src.replace(PICKVAR_RE, (_m, indent, params, body) => {
+    const args = params.split(',').map(s => s.trim().split(/\s+/).pop()).join(', ');
+    return `${indent}float pickVarAuto_(${params}) {${body}}\n` +
+      `${indent}float pickVar(${params}) { return uVarLock < 0.0 ? pickVarAuto_(${args}) : uVarLock; }`;
+  });
 }
 
 // ---- @tweak: 定数を uniform に差し替えてスライダー化 -------------------------
