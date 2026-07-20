@@ -6,6 +6,12 @@
 #  を受け取り、作業状態(idle/thinking/working/done/err)を OSC 12（カーソル色
 #  設定エスケープシーケンス）でシェーダー側に伝える。spec.md §9 参照。
 #
+#  2026-07-18: 単発の色送信ではフェーズ間遷移がシェーダー側で一瞬にスナップして
+#  いた（原因はシェーダーが Ghostty のカーソル uniform に依存していたこと。
+#  claude-terminal-face-status.glsl 冒頭参照）。対策として、色の切り替えを
+#  claude-face-ramp.sh に委譲し、直前色→目標色を短時間で段階送信して遷移の
+#  時間軸をこちら側から供給する。
+#
 #  2026-07-12: hook の stdout は Claude Code 側が JSON パース用に pipe で
 #  読み取っており、端末には届かない。/dev/tty に直接書き込む必要がある
 #  （cli.js の spawn 実装をもとに確認済み）。
@@ -52,12 +58,17 @@ agent_id="$(jq -r '.agent_id // empty' <<<"$json" 2>/dev/null || true)"
 
 event="$(jq -r '.hook_event_name // empty' <<<"$json" 2>/dev/null || true)"
 
-THINK=f0c14b
-WORK=3d6fe0
-DONE=8bd346
-ERR=ff5f6d
+# キー色。claude-terminal-face-status.glsl の *_KEY / misc/palette-check.mjs と
+# 厳密に一致させること（デコード用の固定パレット。2026-07-18 再設計）。
+THINK=f7b81f
+WORK=41419c
+DONE=0a9900
+ERR=e00000
 
-send() { { printf '\e]12;#%s\a' "$1" > "$TTY"; } 2>/dev/null || true; }
+# 目標色を決めてランプに委譲する。ランプ（直前色→目標色の段階送信）は
+# claude-face-ramp.sh がバックグラウンドで行い、ここはすぐ return する。
+RAMP="${BASH_SOURCE[0]%/*}/claude-face-ramp.sh"
+send() { bash "$RAMP" "$TTY" "$1" >/dev/null 2>&1 || true; }
 
 case "$event" in
   UserPromptSubmit)

@@ -38,7 +38,7 @@
     <option value="done">done（ドヤ）</option>
     <option value="err">err（困り）</option>
   </select>
-  <span style="opacity:.6">since が ERR_EASE 未満だと prev→current をイージング中として見える</span>
+  <span style="opacity:.6">since が RAMP_SEC(1.26s) 未満だと prev→current のランプ中の中間色として見える</span>
 </div>
 <div class="row">
   gaze x: <input id="gx" type="range" min="-1" max="1" step="0.01" value="0">
@@ -151,15 +151,41 @@ function setShaderSource(src) {
   }
 }
 
-// claude-terminal-face-status.glsl の FACE_COL/THINK_COL/WORK_COL/DONE_COL/ERR_COL と同じ値。
-// 値を変えたらシェーダー側とここを両方更新すること（spec.md §7.4 と同種の二重管理）。
+// claude-terminal-face-status.glsl の IDLE_KEY/THINK_KEY/WORK_KEY/DONE_KEY/ERR_KEY
+// および claude-face-hook.sh のキー色（16進）と同じ値（デコード用キー。表示ティント
+// とは別物）。値を変えたらシェーダー・hook・misc/palette-check.mjs をすべて更新する
+// こと（spec.md §7.4 と同種の二重管理）。
 const PALETTE = {
-  idle:     [0.36, 0.88, 0.79, 1.0],
-  thinking: [0.94, 0.76, 0.29, 1.0],
-  working:  [0.24, 0.44, 0.88, 1.0],
-  done:     [0.55, 0.83, 0.28, 1.0],
-  err:      [0.95, 0.36, 0.42, 1.0],
+  idle:     [0x5c/255, 0xe0/255, 0xc9/255, 1.0],
+  thinking: [0xf7/255, 0xb8/255, 0x1f/255, 1.0],
+  working:  [0x41/255, 0x41/255, 0x9c/255, 1.0],
+  done:     [0x0a/255, 0x99/255, 0x00/255, 1.0],
+  err:      [0xe0/255, 0x00/255, 0x00/255, 1.0],
 };
+// hook（claude-face-ramp.sh）が旧キー→新キーを送る所要時間（head+body+tail の合計）。
+// シェーダーはもう iPreviousCursorColor をイージングしないので、遷移の
+// スムースさはこのランプが供給する。プレビューでは since をこの軸に見立てて
+// iCurrentCursorColor 自体を prev→current に補間し、実機の見え方を再現する。
+const RAMP_SEC = 1.26;
+// 2026-07-20: 線分上の位置 s は等速ではなく、シェーダーの softmax デコードを
+// 逆写像して決める（理由と式は claude-face-ramp.sh のコメント参照。値もそちらの
+// head/body/tail・wmin・soft と一致させること）。
+const RAMP_SOFT = 0.03, RAMP_WMIN = 0.01;
+const RAMP_HEAD = 5 / 36, RAMP_BODY = 26 / 36;  // 進行度 0..1 上での各区間の割合
+function rampPos(t, prev, cur) {
+  const L2 = prev.slice(0, 3).reduce((s, v, i) => s + (v - cur[i]) ** 2, 0);
+  const K = Math.max(L2 / RAMP_SOFT, 1e-6);
+  const logit = w => Math.log(w / (1 - w));
+  const sLo = Math.max(0.5 + logit(RAMP_WMIN) / (2 * K), 0);
+  const sHi = Math.min(0.5 - logit(RAMP_WMIN) / (2 * K), 1);
+  if (t <= RAMP_HEAD) return sLo * (t / RAMP_HEAD);
+  if (t >= RAMP_HEAD + RAMP_BODY) {
+    return sHi + (1 - sHi) * (t - RAMP_HEAD - RAMP_BODY) / (1 - RAMP_HEAD - RAMP_BODY);
+  }
+  const p = (t - RAMP_HEAD) / RAMP_BODY;
+  const w = RAMP_WMIN + (1 - 2 * RAMP_WMIN) * (p * p * (3 - 2 * p));
+  return 0.5 + logit(w) / (2 * K);
+}
 
 function render() {
   if (!prog) return;
@@ -195,9 +221,15 @@ function render() {
   gl.uniform2f(uniforms.iPreviousCursor, cx, cy);
   gl.uniform1f(uniforms.iTimeCursorChange, iTimeCursorChange);
 
+  // 実機の hook は prev→current を RAMP_SEC かけて送る。プレビューはその中間色を
+  // since から再現して iCurrentCursorColor に入れる（シェーダーはこれを直接
+  // デコードする。iPreviousCursorColor はもう使われないが uniform は残す）。
+  // 位置の決め方は rampPos() を claude-face-ramp.sh と一致させること。
   const prevCol = PALETTE[document.getElementById('prevState').value];
   const curCol = PALETTE[document.getElementById('curState').value];
-  gl.uniform4f(uniforms.iCurrentCursorColor, curCol[0], curCol[1], curCol[2], curCol[3]);
+  const rt = rampPos(Math.min(since / RAMP_SEC, 1.0), prevCol, curCol);
+  const cc = curCol.map((v, i) => prevCol[i] + (v - prevCol[i]) * rt);
+  gl.uniform4f(uniforms.iCurrentCursorColor, cc[0], cc[1], cc[2], cc[3]);
   gl.uniform4f(uniforms.iPreviousCursorColor, prevCol[0], prevCol[1], prevCol[2], prevCol[3]);
   gl.uniform1f(uniforms.uGhosttyFlip, document.getElementById('ghosttyFlip').checked ? 1.0 : 0.0);
 

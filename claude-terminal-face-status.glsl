@@ -20,10 +20,20 @@
 //    - シェル(zsh)の precmd: $status に応じて idle/err の色を送る
 //    - claude-face-hook.sh (Claude Code hooks): thinking/working/done の色を送る
 //
-//  5状態は固定パレットの色として送られ、シェーダー側は現在のカーソル色に
-//  最も近いパレット色を距離ベースで判定する（詳細は spec.md §9）。
+//  5状態は固定キーパレットの色として送られ、シェーダー側は現在のカーソル色に
+//  最も近いキー色を距離ベースで判定する（詳細は spec.md §9）。
 //  claude 実行中は外側シェルの precmd が発火しないため、2つの発生源は
 //  時間的に排他で、同じチャンネルを取り合わない。
+//
+//  フェーズ間のスムースな遷移もこのチャネルで作る: シェーダーはステートレスで
+//  「色がいつ変わったか」を自前で知る術がない（iTimeCursorChange /
+//  iPreviousCursorColor はカーソルの移動・点滅でも上書きされるため使えない。
+//  mainImage 内のコメント参照）ので、hook 側が旧色→新色を段階的に送信して
+//  時間軸を供給し、シェーダーは各瞬間の色を重みへデコードするだけにする。
+//  （2026-07-18: 旧実装はシェーダー側で iPreviousCursorColor→iCurrentCursorColor
+//   をイージングしていたが、遷移中のカーソル移動/点滅で iTimeCursorChange が
+//   リセットされ、フェーズ切替が一瞬でスナップする不具合があった。時間軸の
+//   供給元を hook へ移すことで、Ghostty のカーソル uniform 挙動から切り離した。）
 //
 //  ~/.config/ghostty/config
 //    custom-shader = ~/.config/ghostty/shaders/claude-terminal-face-status.glsl
@@ -38,26 +48,39 @@
 //   iResolution が物理 px か論理 px かはフォント/環境依存で変わるため実機で要検証。
 const vec2  CELL      = vec2(14.5, 28.0);
 const float FACE_SIZE = 0.62;              // 顔の大きさ（画面高に対する比）
-const vec3  FACE_COL  = vec3(0.36, 0.88, 0.79); // 通常時の顔色（idle パレットアンカーも兼ねる）
-const vec3  ERR_COL   = vec3(0.95, 0.36, 0.42); // 失敗時の顔色（err パレットアンカーも兼ねる）
-const vec3  THINK_COL = vec3(0.94, 0.76, 0.29); // 考える顔（調査/プランニング中）
-const vec3  WORK_COL  = vec3(0.24, 0.44, 0.88); // 集中顔（実装中）
-const vec3  DONE_COL  = vec3(0.55, 0.83, 0.28); // ドヤ顔（完了）
+// --- 表示用ティント（顔の発光色）。状態重みで加重合成する。見やすさ優先の淡い彩色。
+//     デコード用キー（下）とは別物: キーはカーソル色サイドチャネルの分離最適化で
+//     RGB キューブ端に寄り暗くなりがちなため、発光色には流用しない（2026-07-18 分離）。
+const vec3  IDLE_TINT  = vec3(0.36, 0.88, 0.79); // 通常時
+const vec3  THINK_TINT = vec3(0.94, 0.76, 0.29); // 考える顔（調査/プランニング中）
+const vec3  WORK_TINT  = vec3(0.24, 0.44, 0.88); // 集中顔（実装中）
+const vec3  DONE_TINT  = vec3(0.55, 0.83, 0.28); // ドヤ顔（完了）
+const vec3  ERR_TINT   = vec3(0.95, 0.36, 0.42); // 失敗時
 const float GAIN      = 0.30;              // 明るさ。上げすぎると本文が読みにくい
 const float GAZE      = 0.07;              // 視線追従の強さ（0 で固定）
 const float IDLE_AT   = 4.0;               // SMILE → IDLE (秒)
 const float SLEEP_AT  = 22.0;              // IDLE → SLEEP (秒)
-const float ERR_EASE  = 0.35;              // 表情が崩れるまでの時間 (秒)
 const float CURSOR_Y_FLIP = 1.0;           // 視線が上下逆なら -1.0
 const float NOISE     = 0.05;
-// ---- Claude Code 連携: 状態パレット距離判定のチューニング -----------------
-// 2026-07-12: 5色パレット（idle/think/work/done/err）間の最小ペア距離二乗は
-// 約 0.16（THINK_COL - DONE_COL 間）。STATE_GATE_HI はこれより十分小さい値
-// にして、パレット間の通常の遷移中に誤って idle へフォールバックしないよう
-// にする。spec.md §9 参照。
+// ---- Claude Code 連携: 状態デコード用キーパレットと距離判定のチューニング -----
+// カーソル色サイドチャネルで送られる 5 状態のキー色。claude-face-hook.sh の
+// IDLE/THINK/WORK/DONE/ERR（16進）および misc/palette-check.mjs と厳密に一致
+// させること。値は misc/palette-check.mjs の探索で決定した:
+// hook がランプ補間する think/work/done/err の 6 ペアについて、線分上の
+// あらゆる中間色が「当事者2状態だけ」にデコードされる（第三状態の混入 <0.5%）
+// よう最適化してある。これがフェーズ間モーフを清浄に見せる前提条件。
+const vec3  IDLE_KEY  = vec3(0.361, 0.878, 0.788); // #5ce0c9
+const vec3  THINK_KEY = vec3(0.969, 0.722, 0.122); // #f7b81f
+const vec3  WORK_KEY  = vec3(0.255, 0.255, 0.612); // #41419c
+const vec3  DONE_KEY  = vec3(0.039, 0.600, 0.000); // #0a9900
+const vec3  ERR_KEY   = vec3(0.878, 0.000, 0.000); // #e00000
 const float STATE_SOFT    = 0.03;  // 状態境界のシャープさ。小さいほど切替が急峻
-const float STATE_GATE_LO = 0.02;  // 5色いずれからも遠い→idleへフォールバック開始（距離二乗）
-const float STATE_GATE_HI = 0.08;  // 完全に idle 側へ倒れる距離二乗
+// gate: 既知キー色・遷移線分のいずれからも遠い色（未知テーマのカーソル色等）を
+// idle へフォールバックさせる距離二乗の帯。閾値は palette-check.mjs の gate 指標
+// 参照（white/black/magenta は >0.26 で gate、think/work/done/err 間の中間色は
+// ~0 で非 gate。gray/orange は線分近傍のため gate 不可 = 既知の限界）。
+const float STATE_GATE_LO = 0.06;  // これ未満: フォールバックなし（遷移中の中間色を保護）
+const float STATE_GATE_HI = 0.20;  // これ超: 完全に idle へフォールバック
 // 2026-07-12 実機検証: Ghostty の fragCoord.y は Shadertoy/OpenGL 規約（下原点・上向き正）
 // と逆で、上原点・下向き正。想定と逆だと顔が丸ごと上下反転する（目と口が入れ替わる）。
 // 1.0 = Ghostty の実際の挙動（上原点）。将来 Ghostty 側で規約が標準化された場合は
@@ -72,6 +95,14 @@ const float TH = 0.052;
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float distSq(vec3 a, vec3 b) { vec3 d = a - b; return dot(d, d); }
+// 点 p と線分 ab の距離二乗。gate 判定を「アンカー距離」から「hook がランプ補間
+// する線分への距離」へ一般化するために使う（詳細は mainImage の gate 節参照）。
+float segDistSq(vec3 p, vec3 a, vec3 b) {
+    vec3 ab = b - a;
+    float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+    vec3 d = p - (a + ab * t);
+    return dot(d, d);
+}
 
 // ---- SDF primitives --------------------------------------------------------
 float sdBox(vec2 p, vec2 c, vec2 b, float r, float rot) {
@@ -662,17 +693,20 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     g += gazeWander(iTime) * smoothstep(1.5, 5.0, since);
 
     // --- サイドチャネル: カーソル色から Claude Code の状態を読む ---
-    // 直前色 → 現在色をイージングし、表情変化そのものを滑らかにする
-    float ease = smoothstep(0.0, ERR_EASE, since);
-    vec3  cc   = mix(iPreviousCursorColor.rgb, iCurrentCursorColor.rgb, ease);
+    // フェーズ間モーフの時間軸は hook 側の色ランプ（claude-face-hook.sh）が
+    // 供給する。したがってここでは iCurrentCursorColor をそのままデコードする
+    // だけにし、iPreviousCursorColor / iTimeCursorChange には依存しない。これらは
+    // カーソルの移動・点滅でも更新されてしまい（Ghostty generic.zig の
+    // cursor_changed 判定で確認、2026-07-18）、依存すると遷移の途中でリセット
+    // されて表情が瞬時に切り替わる（本変更が解消した不具合。ファイル冒頭参照）。
+    vec3 cc = iCurrentCursorColor.rgb;
 
-    // 5色パレットへの距離二乗から状態を分類する（既存の「赤みだけを見る
-    // 1次元判定」を一般化したもの）。
-    float dIdle  = distSq(cc, FACE_COL);
-    float dThink = distSq(cc, THINK_COL);
-    float dWork  = distSq(cc, WORK_COL);
-    float dDone  = distSq(cc, DONE_COL);
-    float dErr   = distSq(cc, ERR_COL);
+    // 5 キー色への距離二乗から状態を softmax でデコードする。
+    float dIdle  = distSq(cc, IDLE_KEY);
+    float dThink = distSq(cc, THINK_KEY);
+    float dWork  = distSq(cc, WORK_KEY);
+    float dDone  = distSq(cc, DONE_KEY);
+    float dErr   = distSq(cc, ERR_KEY);
     float dMin   = min(dIdle, min(dThink, min(dWork, min(dDone, dErr))));
 
     float wIdleS  = exp(-(dIdle  - dMin) / STATE_SOFT);
@@ -683,8 +717,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float wSum = wIdleS + wThinkS + wWorkS + wDoneS + wErrS;
     wIdleS /= wSum; wThinkS /= wSum; wWorkS /= wSum; wDoneS /= wSum; wErrS /= wSum;
 
-    // 5色いずれからも遠い（未知のテーマ既定カーソル色等）なら idle にフォールバック
-    float gate = smoothstep(STATE_GATE_LO, STATE_GATE_HI, dMin);
+    // 未知色フォールバックの gate は「アンカー距離」ではなく「hook がランプ補間
+    // する線分への距離」で測る。ランプ中の中間色はどのキー色からも遠い（線分の
+    // 中ほどにある）ため、アンカー距離 dMin で gate すると遷移の途中で idle へ
+    // 誤ってフォールバックし、モーフが途切れる。線分距離なら中間色は ~0 で
+    // 非 gate、真に未知の色（白/黒/マゼンタ等）だけが gate される。
+    float gd = min(dMin, min(min(
+        min(segDistSq(cc, THINK_KEY, WORK_KEY), segDistSq(cc, THINK_KEY, DONE_KEY)),
+        min(segDistSq(cc, THINK_KEY, ERR_KEY),  segDistSq(cc, WORK_KEY,  DONE_KEY))),
+        min(segDistSq(cc, WORK_KEY,  ERR_KEY),  segDistSq(cc, DONE_KEY,  ERR_KEY))));
+    float gate = smoothstep(STATE_GATE_LO, STATE_GATE_HI, gd);
     wIdleS = mix(wIdleS, 1.0, gate);
     wThinkS *= (1.0 - gate); wWorkS *= (1.0 - gate); wDoneS *= (1.0 - gate); wErrS *= (1.0 - gate);
 
@@ -704,8 +746,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     if (v < 0.07) idx = 0;
 
     float ink = glyphPixel(glyphBits(idx), cellUV);
-    vec3  tint = FACE_COL * wIdleS + THINK_COL * wThinkS + WORK_COL * wWorkS
-               + DONE_COL * wDoneS + ERR_COL * wErrS;
+    vec3  tint = IDLE_TINT * wIdleS + THINK_TINT * wThinkS + WORK_TINT * wWorkS
+               + DONE_TINT * wDoneS + ERR_TINT * wErrS;
     vec3  face = tint * ink * (0.35 + 0.65 * v) * GAIN;
 
     float behind = clamp(1.0 - luma(term.rgb) * 1.6, 0.0, 1.0);
